@@ -20,6 +20,18 @@ pub struct Book {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookEntry {
+    pub id: String,
+    pub title: String,
+    pub author: Option<String>,
+    pub cover_base64: Option<String>,
+    pub cover_mime: Option<String>,
+    pub chapters: Vec<Chapter>,
+    pub imported_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VoiceMode {
     Neutral,

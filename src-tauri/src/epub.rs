@@ -8,35 +8,55 @@ use std::path::{Path, PathBuf};
 use zip::ZipArchive;
 
 pub fn parse_epub(base64: String) -> Result<Book, String> {
+    println!("DEBUG: Starting EPUB parse...");
     let bytes = STANDARD
         .decode(base64.as_bytes())
-        .map_err(|error| format!("Invalid base64: {error}"))?;
+        .map_err(|error| {
+            let err = format!("Invalid base64: {error}");
+            println!("DEBUG ERROR: {}", err);
+            err
+        })?;
     let reader = Cursor::new(bytes);
     let mut zip = ZipArchive::new(reader)
-        .map_err(|error| format!("Invalid EPUB archive: {error}"))?;
+        .map_err(|error| {
+            let err = format!("Invalid EPUB archive: {error}");
+            println!("DEBUG ERROR: {}", err);
+            err
+        })?;
 
+    println!("DEBUG: Reading container.xml...");
     let container_xml = read_zip_file(&mut zip, "META-INF/container.xml")?;
     let opf_path = find_rootfile(&container_xml)?;
+    println!("DEBUG: Found OPF path: {}", opf_path);
     let opf_xml = read_zip_file(&mut zip, &opf_path)?;
 
+    println!("DEBUG: Parsing OPF...");
     let (title, author, manifest, spine, cover) = parse_opf(&opf_xml)?;
+    println!("DEBUG: Found title: {:?}, author: {:?}, spine count: {}", title, author, spine.len());
     let mut chapters = Vec::new();
 
     for (index, idref) in spine.iter().enumerate() {
         let href = match manifest.get(idref) {
             Some(item) => &item.href,
-            None => continue,
+            None => {
+                println!("DEBUG WARNING: Missing manifest item for idref: {}", idref);
+                continue;
+            },
         };
         let chapter_path = resolve_relative_path(&opf_path, href);
         let content = match read_zip_file(&mut zip, &chapter_path) {
             Ok(content) => content,
-            Err(_) => continue,
+            Err(err) => {
+                println!("DEBUG WARNING: Failed to read chapter at {}: {}", chapter_path, err);
+                continue;
+            },
         };
         let chapter_title = extract_title(&content)
             .unwrap_or_else(|| format!("Chapter {}", index + 1));
         let text = html2text::from_read(content.as_bytes(), 120);
         let clean_text = text.trim().to_string();
         if clean_text.is_empty() {
+            println!("DEBUG WARNING: Chapter {} is empty, skipping", chapter_path);
             continue;
         }
         let word_count = clean_text.split_whitespace().count();
@@ -49,8 +69,11 @@ pub fn parse_epub(base64: String) -> Result<Book, String> {
     }
 
     if chapters.is_empty() {
+        println!("DEBUG ERROR: No readable chapters found");
         return Err("No readable chapters found in EPUB.".to_string());
     }
+
+    println!("DEBUG: Found {} chapters", chapters.len());
 
     let (cover_base64, cover_mime) = match cover {
         Some((href, mime)) => {

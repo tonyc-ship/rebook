@@ -36,11 +36,15 @@ const state = {
     mediaRecorder: null,
     audioChunks: [],
     stream: null,
+    duration: 0,
+    timerInterval: null,
   },
   playback: {
     audio: null,
     audioUrl: null,
     isPlaying: false,
+    duration: 0,
+    currentTime: 0,
   }
 };
 
@@ -75,6 +79,7 @@ const selectors = {
   recordBtnText: "#record-btn-text",
   voicePlaybackBtn: "#voice-playback-btn",
   playbackIcon: "#playback-icon",
+  playbackTime: "#playback-time",
 };
 
 const statusPill = document.querySelector(selectors.appStatus);
@@ -107,6 +112,7 @@ const voiceRecordBtn = document.querySelector(selectors.voiceRecordBtn);
 const recordBtnText = document.querySelector(selectors.recordBtnText);
 const voicePlaybackBtn = document.querySelector(selectors.voicePlaybackBtn);
 const playbackIcon = document.querySelector(selectors.playbackIcon);
+const playbackTimeLabel = document.querySelector(selectors.playbackTime);
 
 function setStatus(text, tone = "idle") {
   // Status bar removed as per user request.
@@ -160,12 +166,27 @@ function blobToBase64(blob) {
   });
 }
 
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
 async function startRecording() {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: 1,
+        sampleRate: 44100
+      } 
+    });
     state.recording.stream = stream;
     state.recording.isRecording = true;
     state.recording.audioChunks = [];
+    state.recording.duration = 0;
 
     const mediaRecorder = new MediaRecorder(stream, {
       mimeType: 'audio/webm;codecs=opus'
@@ -178,6 +199,11 @@ async function startRecording() {
     };
 
     mediaRecorder.onstop = async () => {
+      if (state.recording.timerInterval) {
+        clearInterval(state.recording.timerInterval);
+        state.recording.timerInterval = null;
+      }
+      
       const audioBlob = new Blob(state.recording.audioChunks, { type: 'audio/webm;codecs=opus' });
       
       // Convert to WAV format for better compatibility
@@ -210,8 +236,14 @@ async function startRecording() {
     mediaRecorder.start();
     state.recording.mediaRecorder = mediaRecorder;
     
+    // Start timer
+    state.recording.timerInterval = setInterval(() => {
+      state.recording.duration++;
+      recordBtnText.textContent = `Stop (${formatTime(state.recording.duration)})`;
+    }, 1000);
+
     // Update UI
-    recordBtnText.textContent = 'Stop';
+    recordBtnText.textContent = `Stop (0:00)`;
     voiceRecordBtn.classList.add('recording');
     voiceFileName.textContent = 'Recording...';
   } catch (error) {
@@ -301,8 +333,19 @@ function setupPlayback(blob) {
   const audioUrl = URL.createObjectURL(blob);
   const audio = new Audio(audioUrl);
   
+  audio.addEventListener('loadedmetadata', () => {
+    state.playback.duration = Math.floor(audio.duration);
+    updatePlaybackButton();
+  });
+
+  audio.addEventListener('timeupdate', () => {
+    state.playback.currentTime = Math.floor(audio.currentTime);
+    updatePlaybackButton();
+  });
+
   audio.addEventListener('ended', () => {
     state.playback.isPlaying = false;
+    state.playback.currentTime = 0;
     updatePlaybackButton();
   });
   
@@ -320,10 +363,21 @@ function setupPlayback(blob) {
 function updatePlaybackButton() {
   if (!playbackIcon) return;
   
+  const timeInfo = state.playback.audio ? ` (${formatTime(state.playback.currentTime)} / ${formatTime(state.playback.duration)})` : '';
+  
   if (state.playback.isPlaying) {
     playbackIcon.innerHTML = '<rect width="4" height="16" x="6" y="4"/><rect width="4" height="16" x="14" y="4"/>';
   } else {
     playbackIcon.innerHTML = '<polygon points="6 3 20 12 6 21 6 3"/>';
+  }
+  
+  // Update button title or we could append text to the button
+  voicePlaybackBtn.title = `Playback${timeInfo}`;
+  
+  // Let's also update the file name hint to show the time if playing
+  if (state.playback.isPlaying || state.playback.currentTime > 0) {
+    const fileName = voiceFileName.textContent.split(' [')[0];
+    voiceFileName.textContent = `${fileName} [${formatTime(state.playback.currentTime)} / ${formatTime(state.playback.duration)}]`;
   }
 }
 
@@ -597,10 +651,15 @@ function renderReader() {
 function updatePlaybackProgress() {
   if (!state.reader.sentences.length) {
     playbackProgressFill.style.width = '0%';
+    if (playbackTimeLabel) playbackTimeLabel.textContent = '0:00 / 0:00';
     return;
   }
   const progress = (state.reader.sentenceIndex / state.reader.sentences.length) * 100;
   playbackProgressFill.style.width = `${progress}%`;
+  
+  if (playbackTimeLabel) {
+    playbackTimeLabel.textContent = `Sentence ${state.reader.sentenceIndex + 1} / ${state.reader.sentences.length}`;
+  }
 }
 
 function parseAuthorName(name) {
@@ -729,12 +788,12 @@ async function handleEpubImport(file) {
       importedAt: new Date().toISOString(),
     };
     state.library.unshift(entry);
-    localStorage.setItem("rebook-library", JSON.stringify(state.library));
+    await saveLibrary();
     setActiveBook(entry.id);
     setStatus("Book ready", "success");
   } catch (error) {
-    console.error(error);
-    setStatus("Import failed", "error");
+    console.error("EPUB Import Error:", error);
+    setStatus(`Import failed: ${error}`, "error");
   } finally {
     epubInput.value = "";
   }
@@ -865,16 +924,26 @@ async function handleVoiceClone() {
   }
 }
 
-function loadLibrary() {
-  const raw = localStorage.getItem("rebook-library");
-  if (!raw) return;
+async function saveLibrary() {
   try {
-    const saved = JSON.parse(raw);
+    await invoke("save_library", { library: state.library });
+  } catch (error) {
+    console.error("Failed to save library:", error);
+  }
+}
+
+async function loadLibrary() {
+  try {
+    const saved = await invoke("load_library");
     if (Array.isArray(saved)) {
       state.library = saved;
+      renderBookGrid();
+      if (state.activeBookId) {
+        setActiveBook(state.activeBookId);
+      }
     }
   } catch (error) {
-    console.warn("Failed to load library", error);
+    console.error("Failed to load library:", error);
   }
 }
 
@@ -892,11 +961,11 @@ function backfillVoices() {
 
 // Initial Setup
 loadSettings();
-loadLibrary();
-backfillVoices();
-
-applySettingsToUI();
-setActiveBook(state.activeBookId);
+loadLibrary().then(() => {
+  backfillVoices();
+  applySettingsToUI();
+  setActiveBook(state.activeBookId);
+});
 
 // Event Listeners
 toggleLeftBtn.addEventListener('click', () => {
