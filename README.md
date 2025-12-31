@@ -1,8 +1,7 @@
 # Rebook
 
-## Demo
-
-[Watch the demo video](assets/tolkien_rings.mp4)
+## Demo: JRR Tolkien reading The Lord of the Rings
+https://github.com/user-attachments/assets/701227ed-024c-4c3e-87ab-a232767810a3
 
 
 ## Setup
