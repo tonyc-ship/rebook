@@ -31,14 +31,6 @@
 
       <!-- Main Area: Reader -->
       <main id="main-area" class="reader-area">
-        <header class="reader-header">
-          <div class="book-info">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#D4A373" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-            <span id="reader-title">Select a book</span>
-          </div>
-          <div id="reader-meta" class="reader-meta">0% read</div>
-        </header>
-
         <div class="reader-content">
           <div id="reader-text" class="reader-text-container">
             <div class="empty-state">
@@ -50,18 +42,10 @@
           </div>
         </div>
 
+        <button id="read-selection" class="read-selection-btn" type="button" hidden>Read from here</button>
+
         <div class="reader-controls-wrapper">
           <div class="playback-bar">
-            <div class="voice-info">
-              <div id="active-voice-avatar" class="voice-avatar">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-volume2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
-              </div>
-              <div class="voice-details">
-                <span id="active-voice-name" class="voice-name">No voice selected</span>
-                <span id="active-voice-provider" class="voice-provider-label">Provider</span>
-              </div>
-            </div>
-
             <div class="playback-actions">
               <button id="reader-prev" class="nav-button" disabled>
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-left"><path d="m15 18-6-6 6-6"/></svg>
@@ -75,7 +59,7 @@
             </div>
 
             <div class="playback-progress">
-              <span id="playback-time" class="time-label">0:00 / 0:00</span>
+              <span id="playback-time" class="time-label">Page 0 / 0</span>
               <div class="progress-track">
                 <div id="playback-progress-fill" class="progress-fill" style="width: 0%"></div>
               </div>

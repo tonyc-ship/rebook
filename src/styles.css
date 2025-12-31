@@ -144,7 +144,9 @@ body {
 
 .book-cover-wrapper {
   position: relative;
-  width: 100%;
+  width: 150px;
+  max-width: 100%;
+  margin: 0 auto;
   cursor: pointer;
 }
 
@@ -261,32 +263,6 @@ body {
   min-width: 0;
 }
 
-.reader-header {
-  height: 64px;
-  padding: 0 32px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border-color);
-  background: rgba(249, 247, 242, 0.8);
-  backdrop-filter: blur(8px);
-  z-index: 10;
-}
-
-.book-info {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--text-muted);
-}
-
-.reader-meta {
-  font-size: 0.875rem;
-  color: var(--text-muted);
-}
-
 .reader-content {
   flex: 1;
   overflow-y: auto;
@@ -298,21 +274,81 @@ body {
   margin: 0 auto;
 }
 
-.reader-text-container h2 {
+.reader-text-container h1,
+.reader-text-container h2,
+.reader-text-container h3,
+.reader-text-container h4,
+.reader-text-container h5,
+.reader-text-container h6 {
   font-family: serif;
-  font-size: 2.25rem;
-  font-weight: 700;
-  text-align: center;
-  margin-bottom: 48px;
+  margin-top: 2rem;
+  margin-bottom: 1.5rem;
   color: var(--text-secondary);
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.reader-text-container img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 2rem auto;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.reader-text-container a {
+  color: var(--accent-color);
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .reader-text-container p {
   font-family: serif;
-  font-size: 1.25rem;
+  font-size: 1.0rem;
   line-height: 1.8;
   color: #333333;
   margin-bottom: 1.5rem;
+}
+
+.reading-highlight {
+  background: rgba(212, 163, 115, 0.25);
+  border-radius: 4px;
+  box-decoration-break: clone;
+  padding: 0.05em 0.2em;
+}
+
+.reader-text-container b, 
+.reader-text-container strong {
+  font-weight: 700;
+}
+
+.reader-text-container i, 
+.reader-text-container em {
+  font-style: italic;
+}
+
+.reader-text-container ul, 
+.reader-text-container ol {
+  margin-bottom: 1.5rem;
+  padding-left: 1.5rem;
+}
+
+.reader-text-container li {
+  font-family: serif;
+  font-size: 1.0rem;
+  line-height: 1.8;
+  color: #333333;
+  margin-bottom: 0.5rem;
+}
+
+.reader-text-container blockquote {
+  border-left: 4px solid var(--border-color);
+  padding-left: 1rem;
+  margin-left: 0;
+  margin-bottom: 1.5rem;
+  font-style: italic;
+  color: var(--text-muted);
 }
 
 .empty-state {
@@ -355,63 +391,17 @@ body {
   display: flex;
   align-items: center;
   gap: 24px;
+  justify-content: space-between;
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow-lg);
-}
-
-.voice-info {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-}
-
-.voice-avatar {
-  width: 40px;
-  height: 40px;
-  background: var(--panel-bg);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  border: 1px solid var(--border-color);
-  overflow: hidden;
-}
-
-.voice-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.voice-details {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.voice-name {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.voice-provider-label {
-  font-size: 10px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .playback-actions {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex: 1;
+  justify-content: center;
 }
 
 .play-button {
@@ -427,6 +417,30 @@ body {
   cursor: pointer;
   box-shadow: 0 4px 6px -1px rgba(212, 163, 115, 0.3);
   transition: all 0.2s;
+}
+
+.play-button.processing {
+  cursor: progress;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.play-button .spinner {
+  width: 22px;
+  height: 22px;
+  display: block;
+  margin: 0;
+  animation: spin 0.9s linear infinite;
+}
+
+.play-button .spinner circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 48;
+  stroke-dashoffset: 16;
 }
 
 .play-button:hover:not(:disabled) {
@@ -483,6 +497,30 @@ body {
   height: 100%;
   background: var(--accent-color);
   transition: width 0.1s linear;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.read-selection-btn {
+  position: fixed;
+  z-index: 30;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--white);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  box-shadow: var(--shadow-md);
+  transform: translate(-50%, -120%);
+}
+
+.read-selection-btn:hover {
+  background: var(--panel-bg);
 }
 
 /* Voice Panel (Right) */

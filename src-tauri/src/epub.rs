@@ -33,6 +33,24 @@ pub fn parse_epub(base64: String) -> Result<Book, String> {
     println!("DEBUG: Parsing OPF...");
     let (title, author, manifest, spine, cover) = parse_opf(&opf_xml)?;
     println!("DEBUG: Found title: {:?}, author: {:?}, spine count: {}", title, author, spine.len());
+
+    // Pre-calculate image map for the whole book to avoid re-reading ZIP
+    let mut image_map = HashMap::new();
+    for item in manifest.values() {
+        if let Some(media_type) = &item.media_type {
+            if media_type.starts_with("image/") {
+                let path = resolve_relative_path(&opf_path, &item.href);
+                if let Ok(bytes) = read_zip_bytes(&mut zip, &path) {
+                    let b64 = STANDARD.encode(bytes);
+                    let data_url = format!("data:{};base64,{}", media_type, b64);
+                    println!("DEBUG: Added image to map: {} -> data URL ({} bytes)", path, b64.len());
+                    image_map.insert(path.clone(), data_url.clone());
+                }
+            }
+        }
+    }
+    println!("DEBUG: Image map contains {} images", image_map.len());
+
     let mut chapters = Vec::new();
 
     for (index, idref) in spine.iter().enumerate() {
@@ -53,7 +71,11 @@ pub fn parse_epub(base64: String) -> Result<Book, String> {
         };
         let chapter_title = extract_title(&content)
             .unwrap_or_else(|| format!("Chapter {}", index + 1));
-        let text = html2text::from_read(content.as_bytes(), 120);
+        
+        // Replace image sources in HTML with data URLs
+        let processed_html = replace_image_sources(&content, &chapter_path, &image_map);
+
+        let text = html2text::from_read(processed_html.as_bytes(), 120);
         let clean_text = text.trim().to_string();
         if clean_text.is_empty() {
             println!("DEBUG WARNING: Chapter {} is empty, skipping", chapter_path);
@@ -64,6 +86,8 @@ pub fn parse_epub(base64: String) -> Result<Book, String> {
             id: format!("chapter-{}", index + 1),
             title: chapter_title,
             text: clean_text,
+            html: Some(processed_html),
+            source_href: Some(href.to_string()),
             word_count,
         });
     }
@@ -333,6 +357,71 @@ fn extract_title(content: &str) -> Option<String> {
         .find(|node| node.is_element() && node.tag_name().name() == "title")
         .and_then(|node| node.text())
         .map(|text| text.trim().to_string())
+}
+
+fn replace_image_sources(
+    html: &str,
+    chapter_path: &str,
+    image_map: &HashMap<String, String>,
+) -> String {
+    let mut result = html.to_string();
+    
+    // Simple regex-like pattern matching for img tags
+    // This is a simplified approach - we look for <img and find src="..." within the tag
+    let mut search_pos = 0;
+    while let Some(img_start) = result[search_pos..].find("<img") {
+        let img_start = search_pos + img_start;
+        let tag_end = if let Some(end) = result[img_start..].find('>') {
+            img_start + end
+        } else {
+            break;
+        };
+        
+        let tag_content = &result[img_start..tag_end];
+        
+        // Find src="..." or src='...'
+        if let Some(src_start) = tag_content.find("src=\"") {
+            let value_start = img_start + src_start + 5; // after src="
+            if let Some(quote_end) = result[value_start..].find('"') {
+                let value_end = value_start + quote_end;
+                let img_src = &result[value_start..value_end];
+                
+                // Resolve the image path relative to the chapter
+                let resolved_path = resolve_relative_path(chapter_path, img_src);
+                
+                // Look it up in the image map
+                if let Some(data_url) = image_map.get(&resolved_path) {
+                    println!("DEBUG: Replacing image src '{}' -> data URL", img_src);
+                    result.replace_range(value_start..value_end, data_url);
+                    search_pos = value_start + data_url.len();
+                    continue;
+                } else {
+                    println!("DEBUG WARNING: Image not found in map: {} (resolved: {})", img_src, resolved_path);
+                }
+            }
+        } else if let Some(src_start) = tag_content.find("src='") {
+            let value_start = img_start + src_start + 5; // after src='
+            if let Some(quote_end) = result[value_start..].find('\'') {
+                let value_end = value_start + quote_end;
+                let img_src = &result[value_start..value_end];
+                
+                let resolved_path = resolve_relative_path(chapter_path, img_src);
+                
+                if let Some(data_url) = image_map.get(&resolved_path) {
+                    println!("DEBUG: Replacing image src '{}' -> data URL", img_src);
+                    result.replace_range(value_start..value_end, data_url);
+                    search_pos = value_start + data_url.len();
+                    continue;
+                } else {
+                    println!("DEBUG WARNING: Image not found in map: {} (resolved: {})", img_src, resolved_path);
+                }
+            }
+        }
+        
+        search_pos = tag_end;
+    }
+    
+    result
 }
 
 fn extract_first_image_src(content: &str) -> Option<String> {

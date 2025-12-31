@@ -6,6 +6,8 @@ pub struct Chapter {
     pub id: String,
     pub title: String,
     pub text: String,
+    pub html: Option<String>,
+    pub source_href: Option<String>,
     pub word_count: usize,
 }
 

@@ -15,6 +15,7 @@ const state = {
   elevenlabsVoices: [],
   activeVoice: null,
   activeBookId: null,
+  readingPositions: {},
   activeAudio: null,
   reader: {
     pages: [],
@@ -22,6 +23,8 @@ const state = {
     sentences: [],
     sentenceIndex: 0,
     sentencePageMap: [],
+    highlightRange: null,
+    isGenerating: false,
     isPlaying: false,
     isAdvancing: false,
     prefetchQueue: [],
@@ -53,8 +56,6 @@ const selectors = {
   epubInput: "#epub-input",
   bookGrid: "#book-grid",
   importTrigger: "#import-trigger",
-  readerTitle: "#reader-title",
-  readerMeta: "#reader-meta",
   voiceList: "#voice-list",
   voiceCreateToggle: "#voice-create-toggle",
   voiceCreate: "#voice-create",
@@ -67,13 +68,11 @@ const selectors = {
   readerPrev: "#reader-prev",
   readerNext: "#reader-next",
   readerPlay: "#reader-play",
+  readSelection: "#read-selection",
   toggleLeft: "#toggle-left",
   toggleRight: "#toggle-right",
   leftPanel: "#left-panel",
   rightPanel: "#right-panel",
-  activeVoiceAvatar: "#active-voice-avatar",
-  activeVoiceName: "#active-voice-name",
-  activeVoiceProvider: "#active-voice-provider",
   playbackProgressFill: "#playback-progress-fill",
   voiceRecordBtn: "#voice-record-btn",
   recordBtnText: "#record-btn-text",
@@ -86,8 +85,6 @@ const statusPill = document.querySelector(selectors.appStatus);
 const epubInput = document.querySelector(selectors.epubInput);
 const bookGrid = document.querySelector(selectors.bookGrid);
 const importTrigger = document.querySelector(selectors.importTrigger);
-const readerTitle = document.querySelector(selectors.readerTitle);
-const readerMeta = document.querySelector(selectors.readerMeta);
 const voiceList = document.querySelector(selectors.voiceList);
 const voiceCreateToggle = document.querySelector(selectors.voiceCreateToggle);
 const voiceCreate = document.querySelector(selectors.voiceCreate);
@@ -100,13 +97,11 @@ const readerText = document.querySelector(selectors.readerText);
 const readerPrev = document.querySelector(selectors.readerPrev);
 const readerNext = document.querySelector(selectors.readerNext);
 const readerPlay = document.querySelector(selectors.readerPlay);
+const readSelectionBtn = document.querySelector(selectors.readSelection);
 const toggleLeftBtn = document.querySelector(selectors.toggleLeft);
 const toggleRightBtn = document.querySelector(selectors.toggleRight);
 const leftPanel = document.querySelector(selectors.leftPanel);
 const rightPanel = document.querySelector(selectors.rightPanel);
-const activeVoiceAvatar = document.querySelector(selectors.activeVoiceAvatar);
-const activeVoiceName = document.querySelector(selectors.activeVoiceName);
-const activeVoiceProvider = document.querySelector(selectors.activeVoiceProvider);
 const playbackProgressFill = document.querySelector(selectors.playbackProgressFill);
 const voiceRecordBtn = document.querySelector(selectors.voiceRecordBtn);
 const recordBtnText = document.querySelector(selectors.recordBtnText);
@@ -403,6 +398,7 @@ function saveSettings() {
     elevenlabsVoices: state.elevenlabsVoices,
     activeVoice: state.activeVoice,
     activeBookId: state.activeBookId,
+    readingPositions: state.readingPositions,
     ui: state.ui,
   };
   localStorage.setItem("rebook-settings", JSON.stringify(payload));
@@ -420,6 +416,7 @@ function loadSettings() {
     if (Array.isArray(saved.elevenlabsVoices)) state.elevenlabsVoices = saved.elevenlabsVoices;
     if (saved.activeVoice) state.activeVoice = saved.activeVoice;
     if (saved.activeBookId) state.activeBookId = saved.activeBookId;
+    if (saved.readingPositions) state.readingPositions = saved.readingPositions;
     if (saved.ui) state.ui = saved.ui;
   } catch (error) {
     console.warn("Failed to load settings", error);
@@ -430,21 +427,9 @@ function applySettingsToUI() {
   if (state.ui.leftCollapsed) leftPanel.classList.add('collapsed');
   if (state.ui.rightCollapsed) rightPanel.classList.add('collapsed');
   
-  if (state.activeVoice) {
-    updateActiveVoiceUI();
-  }
-  
   voiceProvider.value = state.voiceMode;
   renderVoiceList();
   renderBookGrid();
-}
-
-function updateActiveVoiceUI() {
-  if (!state.activeVoice) return;
-  activeVoiceName.textContent = state.activeVoice.label;
-  activeVoiceProvider.textContent = state.activeVoice.provider;
-  // In a real app we'd have avatars, for now use initials or generic icon
-  activeVoiceAvatar.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-volume2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>`;
 }
 
 function setActiveVoice(provider, voiceId, label) {
@@ -456,7 +441,6 @@ function setActiveVoice(provider, voiceId, label) {
   if (buttonText) {
     buttonText.textContent = "Create New Voice";
   }
-  updateActiveVoiceUI();
   saveSettings();
   renderVoiceList();
   pauseReaderPlayback();
@@ -555,6 +539,9 @@ function removeBook(bookId, isConfirmed = false) {
     state.book = null;
     resetReaderState();
   }
+  if (state.readingPositions && state.readingPositions[bookId]) {
+    delete state.readingPositions[bookId];
+  }
   
   // Save to localStorage
   try {
@@ -617,49 +604,278 @@ function renderReader() {
         <div class="empty-icon"><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div>
         <p>Select a book to start reading</p>
       </div>`;
-    readerTitle.textContent = "Select a book";
-    readerMeta.textContent = "0% read";
     readerPrev.disabled = true;
     readerNext.disabled = true;
-    readerPlay.disabled = true;
+    updateReaderPlayButton();
     return;
   }
 
   const page = state.reader.pages[state.reader.pageIndex] || "";
-  const progress = Math.round(((state.reader.pageIndex + 1) / state.reader.pages.length) * 100) || 0;
-  
-  readerTitle.textContent = state.book.title;
-  readerMeta.textContent = `${progress}% read`;
-  
   // Just show title and content
   readerText.innerHTML = `
-    <h2>${state.book.title}</h2>
-    ${formatReaderText(page)}
+    ${page}
   `;
   
   readerPrev.disabled = state.reader.pageIndex === 0;
   readerNext.disabled = state.reader.pageIndex >= state.reader.pages.length - 1;
-  readerPlay.disabled = !state.activeVoice;
-  
-  readerPlay.innerHTML = state.reader.isPlaying 
-    ? `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-pause"><rect width="4" height="16" x="6" y="4"/><rect width="4" height="16" x="14" y="4"/></svg>`
-    : `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-play"><polygon points="6 3 20 12 6 21 6 3"/></svg>`;
+  updateReaderPlayButton();
 
   updatePlaybackProgress();
 }
 
-function updatePlaybackProgress() {
-  if (!state.reader.sentences.length) {
-    playbackProgressFill.style.width = '0%';
-    if (playbackTimeLabel) playbackTimeLabel.textContent = '0:00 / 0:00';
+function updateReaderPlayButton() {
+  if (!readerPlay) return;
+  readerPlay.disabled = !state.activeVoice;
+  readerPlay.classList.toggle('processing', state.reader.isGenerating);
+  if (state.reader.isGenerating) {
+    readerPlay.innerHTML = `<svg class="spinner" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle></svg>`;
     return;
   }
-  const progress = (state.reader.sentenceIndex / state.reader.sentences.length) * 100;
+  readerPlay.innerHTML = state.reader.isPlaying
+    ? `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-pause"><rect width="4" height="16" x="6" y="4"/><rect width="4" height="16" x="14" y="4"/></svg>`
+    : `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-play"><polygon points="6 3 20 12 6 21 6 3"/></svg>`;
+}
+
+function clearReadingHighlights() {
+  const highlights = readerText.querySelectorAll('.reading-highlight');
+  highlights.forEach((el) => {
+    const textNode = document.createTextNode(el.textContent || '');
+    el.replaceWith(textNode);
+  });
+}
+
+function highlightCurrentSentence() {
+  if (!readerText || !state.reader.sentences.length) return;
+  const selection = window.getSelection ? window.getSelection() : null;
+  if (selection && !selection.isCollapsed && selection.rangeCount) {
+    const range = selection.getRangeAt(0);
+    const container = range.commonAncestorContainer;
+    if (container && readerText.contains(container)) return;
+  }
+  clearReadingHighlights();
+  const highlightRange = state.reader.highlightRange;
+  const startIndex = highlightRange ? highlightRange.start : state.reader.sentenceIndex;
+  const count = highlightRange ? highlightRange.count : 1;
+  const sentences = state.reader.sentences.slice(startIndex, startIndex + count).filter(Boolean);
+  if (!sentences.length) return;
+
+  sentences.forEach((sentence) => {
+    const sentencePattern = sentence
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/\s+/g, '\\s+');
+    const sentenceRegex = new RegExp(sentencePattern);
+    const walker = document.createTreeWalker(readerText, NodeFilter.SHOW_TEXT, null);
+    let node;
+    while ((node = walker.nextNode())) {
+      const text = node.textContent || "";
+      const match = sentenceRegex.exec(text);
+      if (!match) continue;
+      const range = document.createRange();
+      range.setStart(node, match.index);
+      range.setEnd(node, match.index + match[0].length);
+      const highlight = document.createElement('span');
+      highlight.className = 'reading-highlight';
+      range.surroundContents(highlight);
+      break;
+    }
+  });
+}
+
+function updatePlaybackProgress() {
+  if (!state.reader.pages.length) {
+    playbackProgressFill.style.width = '0%';
+    if (playbackTimeLabel) playbackTimeLabel.textContent = 'Page 0 / 0';
+    return;
+  }
+  const progress = ((state.reader.pageIndex + 1) / state.reader.pages.length) * 100;
   playbackProgressFill.style.width = `${progress}%`;
   
   if (playbackTimeLabel) {
-    playbackTimeLabel.textContent = `Sentence ${state.reader.sentenceIndex + 1} / ${state.reader.sentences.length}`;
+    playbackTimeLabel.textContent = `Page ${state.reader.pageIndex + 1} / ${state.reader.pages.length}`;
   }
+  highlightCurrentSentence();
+}
+
+let lastSelectionMismatchLogKey = null;
+
+function findSentenceIndexForSelection(text, pageIndex) {
+  const normalized = (text || "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!normalized) return -1;
+
+  const parts = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const fragment = (parts[0] || normalized).slice(0, 160);
+  const fragmentWords = fragment.split(/\s+/).slice(0, 16).join(" ").trim();
+  const fragmentForMatch = fragmentWords.length >= 8 ? fragmentWords : fragment;
+  const fallbackFragment = normalized.split(/\s+/).slice(0, 12).join(" ").trim();
+
+  const anchorIndex = Number.isInteger(pageIndex)
+    ? state.reader.sentencePageMap.findIndex((v) => v === pageIndex)
+    : state.reader.sentenceIndex;
+
+  const scoreCandidate = (i) => {
+    if (!Number.isInteger(anchorIndex) || anchorIndex < 0) return 0;
+    return -Math.abs(i - anchorIndex);
+  };
+
+  const findBestMatch = (needle, restrictToPage) => {
+    if (!needle || needle.length < 8) return -1;
+    let bestIndex = -1;
+    let bestScore = -Infinity;
+    for (let i = 0; i < state.reader.sentences.length; i++) {
+      if (restrictToPage && Number.isInteger(pageIndex) && state.reader.sentencePageMap[i] !== pageIndex) continue;
+      const sentence = (state.reader.sentences[i] || "").replace(/\s+/g, " ").trim().toLowerCase();
+      if (!sentence) continue;
+      if (!sentence.includes(needle)) continue;
+      const score = scoreCandidate(i);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+    return bestIndex;
+  };
+
+  let pageMatch = findBestMatch(fragmentForMatch, true);
+  if (pageMatch < 0) pageMatch = findBestMatch(fallbackFragment, true);
+  if (pageMatch >= 0) return pageMatch;
+
+  let globalMatch = findBestMatch(fragmentForMatch, false);
+  if (globalMatch < 0) globalMatch = findBestMatch(fallbackFragment, false);
+  if (globalMatch >= 0) return globalMatch;
+
+  for (let i = 0; i < state.reader.sentences.length; i++) {
+    if (Number.isInteger(pageIndex) && state.reader.sentencePageMap[i] !== pageIndex) continue;
+    const sentence = (state.reader.sentences[i] || "").replace(/\s+/g, " ").trim().toLowerCase();
+    if (!sentence) continue;
+    if (sentence.includes(normalized) || normalized.includes(sentence)) return i;
+  }
+
+  for (let i = 0; i < state.reader.sentences.length; i++) {
+    const sentence = (state.reader.sentences[i] || "").replace(/\s+/g, " ").trim().toLowerCase();
+    if (!sentence) continue;
+    if (sentence.includes(normalized) || normalized.includes(sentence)) return i;
+  }
+
+  return -1;
+}
+
+function findSentenceIndexForSelectionOnPage(text, pageIndex) {
+  if (!Number.isInteger(pageIndex)) return -1;
+  const normalized = (text || "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!normalized) return -1;
+
+  const parts = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const fragment = (parts[0] || normalized).slice(0, 160);
+  const fragmentWords = fragment.split(/\s+/).slice(0, 16).join(" ").trim();
+  const fragmentForMatch = fragmentWords.length >= 8 ? fragmentWords : fragment;
+  const fallbackFragment = normalized.split(/\s+/).slice(0, 12).join(" ").trim();
+
+  const tryNeedle = (needle) => {
+    if (!needle || needle.length < 8) return -1;
+    for (let i = 0; i < state.reader.sentences.length; i++) {
+      if (state.reader.sentencePageMap[i] !== pageIndex) continue;
+      const sentence = (state.reader.sentences[i] || "").replace(/\s+/g, " ").trim().toLowerCase();
+      if (!sentence) continue;
+      if (sentence.includes(needle)) return i;
+    }
+    return -1;
+  };
+
+  let idx = tryNeedle(fragmentForMatch);
+  if (idx < 0) idx = tryNeedle(fallbackFragment);
+  if (idx >= 0) return idx;
+
+  for (let i = 0; i < state.reader.sentences.length; i++) {
+    if (state.reader.sentencePageMap[i] !== pageIndex) continue;
+    const sentence = (state.reader.sentences[i] || "").replace(/\s+/g, " ").trim().toLowerCase();
+    if (!sentence) continue;
+    if (sentence.includes(normalized) || normalized.includes(sentence)) return i;
+  }
+  return -1;
+}
+
+function hideReadSelectionButton() {
+  if (!readSelectionBtn) return;
+  readSelectionBtn.hidden = true;
+  delete readSelectionBtn.dataset.sentenceIndex;
+}
+
+function updateReadSelectionButton() {
+  if (!readSelectionBtn || !readerText || !state.book) {
+    hideReadSelectionButton();
+    return;
+  }
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) {
+    hideReadSelectionButton();
+    return;
+  }
+  const text = selection.toString().trim();
+  if (!text || text.length < 2) {
+    hideReadSelectionButton();
+    return;
+  }
+  const range = selection.rangeCount ? selection.getRangeAt(0) : null;
+  if (!range) {
+    hideReadSelectionButton();
+    return;
+  }
+  const container = range.commonAncestorContainer;
+  if (!readerText.contains(container)) {
+    hideReadSelectionButton();
+    return;
+  }
+  const pageOnlyIndex = findSentenceIndexForSelectionOnPage(text, state.reader.pageIndex);
+  if (pageOnlyIndex < 0 && text.length >= 6) {
+    const key = `${state.reader.pageIndex}|${text.slice(0, 40)}`;
+    if (key !== lastSelectionMismatchLogKey) {
+      lastSelectionMismatchLogKey = key;
+      const tempDiv = document.createElement("div");
+      tempDiv.innerHTML = state.reader.pages[state.reader.pageIndex] || "";
+      const pageText = (tempDiv.textContent || "").replace(/\s+/g, " ").trim();
+      const normalizedSelection = text.replace(/\s+/g, " ").trim().toLowerCase();
+      const globalMatchIndex = findSentenceIndexForSelection(text, state.reader.pageIndex);
+      const globalMatchPageIndex =
+        globalMatchIndex >= 0 ? state.reader.sentencePageMap[globalMatchIndex] : null;
+      const globalMatchSentencePreview =
+        globalMatchIndex >= 0 ? (state.reader.sentences[globalMatchIndex] || "").slice(0, 220) : "";
+      console.warn("Read from here: selection not found on current page (page-only match failed)", {
+        pageIndex: state.reader.pageIndex,
+        selectionText: text.slice(0, 200),
+        pageContainsSelection: pageText.toLowerCase().includes(normalizedSelection),
+        pageTextPreview: pageText.slice(0, 8000),
+        pageTextLength: pageText.length,
+        globalMatchIndex,
+        globalMatchPageIndex,
+        globalMatchSentencePreview,
+      });
+    }
+  }
+
+  let sentenceIndex = pageOnlyIndex;
+  if (sentenceIndex < 0) {
+    sentenceIndex = findSentenceIndexForSelection(text, state.reader.pageIndex);
+  }
+  if (sentenceIndex < 0) {
+    const fallbackIndex = state.reader.sentencePageMap.findIndex(v => v === state.reader.pageIndex);
+    sentenceIndex = fallbackIndex >= 0 ? fallbackIndex : state.reader.sentenceIndex;
+  }
+  const rect = range.getBoundingClientRect();
+  const left = Math.min(Math.max(rect.left + rect.width / 2, 16), window.innerWidth - 16);
+  const top = Math.max(rect.top, 16);
+  readSelectionBtn.style.left = `${left}px`;
+  readSelectionBtn.style.top = `${top}px`;
+  readSelectionBtn.hidden = false;
+  readSelectionBtn.dataset.sentenceIndex = String(sentenceIndex);
+}
+
+let selectionUpdateRaf = null;
+function scheduleUpdateReadSelectionButton() {
+  if (selectionUpdateRaf) cancelAnimationFrame(selectionUpdateRaf);
+  selectionUpdateRaf = requestAnimationFrame(() => {
+    selectionUpdateRaf = null;
+    updateReadSelectionButton();
+  });
 }
 
 function parseAuthorName(name) {
@@ -676,6 +892,7 @@ function parseAuthorName(name) {
 }
 
 function setActiveBook(bookId) {
+  persistReadingPosition();
   const book = state.library.find((item) => item.id === bookId) || null;
   state.activeBookId = book ? book.id : null;
   state.book = book;
@@ -684,6 +901,23 @@ function setActiveBook(bookId) {
   
   if (book) {
     buildReaderData(book);
+    const savedPosition = state.readingPositions && state.readingPositions[book.id];
+    if (savedPosition) {
+      const maxPageIndex = Math.max(0, state.reader.pages.length - 1);
+      const targetPageIndex = Math.min(Math.max(savedPosition.pageIndex || 0, 0), maxPageIndex);
+      state.reader.pageIndex = targetPageIndex;
+      const mappedSentenceIndex = state.reader.sentencePageMap.findIndex(v => v === targetPageIndex);
+      if (
+        Number.isInteger(savedPosition.sentenceIndex) &&
+        state.reader.sentencePageMap[savedPosition.sentenceIndex] === targetPageIndex
+      ) {
+        state.reader.sentenceIndex = savedPosition.sentenceIndex;
+      } else if (mappedSentenceIndex >= 0) {
+        state.reader.sentenceIndex = mappedSentenceIndex;
+      } else {
+        state.reader.sentenceIndex = 0;
+      }
+    }
     // Autofill author name for voice cloning
     if (book.author) {
       voiceNameInput.value = parseAuthorName(book.author);
@@ -694,6 +928,16 @@ function setActiveBook(bookId) {
   renderReader();
 }
 
+function persistReadingPosition() {
+  if (!state.activeBookId || !state.reader.pages.length) return;
+  if (!state.readingPositions) state.readingPositions = {};
+  state.readingPositions[state.activeBookId] = {
+    pageIndex: state.reader.pageIndex,
+    sentenceIndex: state.reader.sentenceIndex,
+  };
+  saveSettings();
+}
+
 function resetReaderState() {
   state.reader = {
     pages: [],
@@ -701,6 +945,8 @@ function resetReaderState() {
     sentences: [],
     sentenceIndex: 0,
     sentencePageMap: [],
+    highlightRange: null,
+    isGenerating: false,
     isPlaying: false,
     isAdvancing: false,
     prefetchQueue: [],
@@ -710,49 +956,138 @@ function resetReaderState() {
 
 function buildReaderData(book) {
   const paragraphs = [];
+  const parser = new DOMParser();
+
   book.chapters.forEach((chapter) => {
-    chapter.text.split(/\n+/).map(l => l.trim()).filter(Boolean).forEach(l => paragraphs.push(l));
+    if (chapter.html) {
+      try {
+        const doc = parser.parseFromString(chapter.html, 'text/html');
+        // Extract meaningful content blocks
+        const blocks = doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, img');
+        if (blocks.length > 0) {
+          blocks.forEach(block => {
+            // Cleanup attributes but keep important ones
+            const cleanBlock = block.cloneNode(true);
+            const attrs = Array.from(cleanBlock.attributes);
+            attrs.forEach(attr => {
+              if (attr.name !== 'src' && attr.name !== 'href' && attr.name !== 'id') {
+                cleanBlock.removeAttribute(attr.name);
+              }
+            });
+            // Mark which source file this block came from
+            if (chapter.sourceHref) {
+              cleanBlock.setAttribute('data-source', chapter.sourceHref);
+            }
+            paragraphs.push(cleanBlock.outerHTML);
+          });
+        } else {
+          // Fallback if no blocks found
+          chapter.text.split(/\n+/).map(l => l.trim()).filter(Boolean).forEach(l => {
+            paragraphs.push(`<p>${l}</p>`);
+          });
+        }
+      } catch (e) {
+        console.warn("Failed to parse chapter HTML, falling back to text", e);
+        chapter.text.split(/\n+/).map(l => l.trim()).filter(Boolean).forEach(l => {
+          paragraphs.push(`<p>${l}</p>`);
+        });
+      }
+    } else {
+      chapter.text.split(/\n+/).map(l => l.trim()).filter(Boolean).forEach(l => {
+        paragraphs.push(`<p>${l}</p>`);
+      });
+    }
   });
 
-  const combined = paragraphs.join(" ");
+  const combined = paragraphs.map(p => {
+    const div = document.createElement('div');
+    div.innerHTML = p;
+    return div.textContent || "";
+  }).join(" ");
+
   const sentences = splitIntoSentences(combined);
   const pages = [];
-  const sentencePageMap = [];
   const wordLimit = 250;
   let current = [];
   let currentCount = 0;
   const pageWordCounts = [];
 
-  paragraphs.forEach((paragraph) => {
-    const words = paragraph.split(/\s+/).filter(Boolean);
+  const tempDiv = document.createElement('div');
+
+  paragraphs.forEach((paragraphHtml) => {
+    tempDiv.innerHTML = paragraphHtml;
+    const textContent = tempDiv.textContent || "";
+    const words = textContent.split(/\s+/).filter(Boolean);
+    
     if (currentCount + words.length > wordLimit && currentCount > 0) {
-      pages.push(current.join("\n\n"));
+      pages.push(current.join(""));
       pageWordCounts.push(currentCount);
       current = [];
       currentCount = 0;
     }
-    current.push(paragraph);
+    current.push(paragraphHtml);
     currentCount += words.length;
   });
 
   if (current.length > 0) {
-    pages.push(current.join("\n\n"));
+    pages.push(current.join(""));
     pageWordCounts.push(currentCount);
   }
 
-  let pIdx = 0;
-  let pWordTotal = pageWordCounts[0] || 0;
-  let sWordTotal = 0;
-
-  sentences.forEach((s, i) => {
-    const words = s.split(/\s+/).filter(Boolean);
-    sWordTotal += words.length;
-    while (sWordTotal > pWordTotal && pIdx < pageWordCounts.length - 1) {
-      pIdx += 1;
-      pWordTotal += pageWordCounts[pIdx];
-    }
-    sentencePageMap[i] = pIdx;
+  const pageTextNormalized = pages.map((pageHtml) => {
+    tempDiv.innerHTML = pageHtml || "";
+    return normalizeForMatch(tempDiv.textContent || "");
   });
+
+  const sentencePageMapByWordCount = [];
+  {
+    let pIdx = 0;
+    let pWordTotal = pageWordCounts[0] || 0;
+    let sWordTotal = 0;
+
+    sentences.forEach((s, i) => {
+      const words = s.split(/\s+/).filter(Boolean);
+      sWordTotal += words.length;
+      while (sWordTotal > pWordTotal && pIdx < pageWordCounts.length - 1) {
+        pIdx += 1;
+        pWordTotal += pageWordCounts[pIdx];
+      }
+      sentencePageMapByWordCount[i] = pIdx;
+    });
+  }
+
+  const sentencePageMap = [];
+  {
+    let pIdx = 0;
+    const lookahead = 3;
+    for (let i = 0; i < sentences.length; i++) {
+      const sNorm = normalizeForMatch(sentences[i]);
+      if (!sNorm) {
+        sentencePageMap[i] = pIdx;
+        continue;
+      }
+
+      let found = -1;
+      for (let j = 0; j < lookahead; j++) {
+        const candidatePage = pIdx + j;
+        if (candidatePage >= pageTextNormalized.length) break;
+        if (pageTextNormalized[candidatePage].includes(sNorm)) {
+          found = candidatePage;
+          break;
+        }
+      }
+
+      if (found >= 0) {
+        pIdx = found;
+        sentencePageMap[i] = pIdx;
+        continue;
+      }
+
+      const fallback = sentencePageMapByWordCount[i] ?? pIdx;
+      sentencePageMap[i] = fallback;
+      pIdx = Math.max(pIdx, fallback);
+    }
+  }
 
   state.reader = {
     ...state.reader,
@@ -761,6 +1096,8 @@ function buildReaderData(book) {
     sentences,
     sentenceIndex: 0,
     sentencePageMap,
+    highlightRange: null,
+    isGenerating: false,
     isPlaying: false,
   };
 }
@@ -770,6 +1107,10 @@ function splitIntoSentences(text) {
   if (!normalized) return [];
   const matches = normalized.match(/[^.!?]+[.!?]+|[^.!?]+$/g);
   return matches ? matches.map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function normalizeForMatch(text) {
+  return (text || "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 async function handleEpubImport(file) {
@@ -799,6 +1140,45 @@ async function handleEpubImport(file) {
   }
 }
 
+async function generateAudio(index, text) {
+  if (!state.activeVoice) throw new Error("No active voice");
+  
+  return await invoke("tts_generate", {
+    request: {
+      chapterId: `chunk-${index}`,
+      text: text,
+      voiceMode: state.voiceMode,
+      minimax: state.voiceMode === 'minimax' ? { voiceId: state.activeVoice.voiceId, model: "speech-2.6-hd", outputFormat: "mp3" } : null,
+      elevenlabs: state.voiceMode === 'elevenlabs' ? { voiceId: state.activeVoice.voiceId, model: "eleven_multilingual_v2" } : null,
+      external: null
+    }
+  });
+}
+
+async function prefetchNextChunk(nextIndex) {
+  if (nextIndex >= state.reader.sentences.length) return;
+  if (state.reader.prefetchQueue.some(item => item.index === nextIndex)) return;
+  if (state.reader.isPrefetching) return;
+  if (!state.activeVoice) return;
+
+  state.reader.isPrefetching = true;
+  
+  try {
+    const chunk = state.reader.sentences.slice(nextIndex, nextIndex + 2).join(" ");
+    if (!chunk.trim()) {
+      state.reader.isPrefetching = false;
+      return;
+    }
+    
+    const clip = await generateAudio(nextIndex, chunk);
+    state.reader.prefetchQueue.push({ index: nextIndex, clip });
+  } catch (error) {
+    console.warn("Prefetch failed:", error);
+  } finally {
+    state.reader.isPrefetching = false;
+  }
+}
+
 async function playNextChunk() {
   if (!state.reader.isPlaying || state.reader.isAdvancing) return;
   if (state.reader.sentenceIndex >= state.reader.sentences.length) {
@@ -809,39 +1189,56 @@ async function playNextChunk() {
   }
 
   state.reader.isAdvancing = true;
-  const chunk = state.reader.sentences.slice(state.reader.sentenceIndex, state.reader.sentenceIndex + 2).join(" ");
   const count = 2;
-
+  const currentIndex = state.reader.sentenceIndex;
+  state.reader.highlightRange = { start: currentIndex, count };
+  highlightCurrentSentence();
+  
   try {
-    const audioClip = await invoke("tts_generate", {
-      request: {
-        chapterId: `chunk-${state.reader.sentenceIndex}`,
-        text: chunk,
-        voiceMode: state.voiceMode,
-        minimax: state.voiceMode === 'minimax' ? { voiceId: state.activeVoice.voiceId, model: "speech-2.6-hd", outputFormat: "mp3" } : null,
-        elevenlabs: state.voiceMode === 'elevenlabs' ? { voiceId: state.activeVoice.voiceId, model: "eleven_multilingual_v2" } : null,
-        external: null
-      }
-    });
+    let audioClip;
+    const prefetched = state.reader.prefetchQueue.find(item => item.index === currentIndex);
+    
+    if (prefetched) {
+      audioClip = prefetched.clip;
+      state.reader.prefetchQueue = state.reader.prefetchQueue.filter(item => item.index !== currentIndex);
+    } else {
+      state.reader.isGenerating = true;
+      updateReaderPlayButton();
+      const chunkSentences = state.reader.sentences.slice(currentIndex, currentIndex + count);
+      const chunk = chunkSentences.join(" ");
+      console.log("Audio chunk:", { currentIndex, count, chunkSentences, chunk });
+      audioClip = await generateAudio(currentIndex, chunk);
+    }
+    state.reader.isGenerating = false;
+    updateReaderPlayButton();
     
     const audio = new Audio(`data:${audioClip.mime};base64,${audioClip.audioBase64}`);
     state.activeAudio = audio;
+    
     audio.addEventListener("ended", () => {
       state.reader.sentenceIndex += count;
       const nextPageIndex = state.reader.sentencePageMap[state.reader.sentenceIndex] ?? state.reader.pageIndex;
       if (nextPageIndex !== state.reader.pageIndex) {
         state.reader.pageIndex = nextPageIndex;
         renderReader();
+        persistReadingPosition();
       } else {
         updatePlaybackProgress();
       }
       state.reader.isAdvancing = false;
       playNextChunk();
     });
+    
     audio.play();
     setStatus("Playing", "playing");
+    
+    // Background prefetch for the NEXT chunk
+    prefetchNextChunk(currentIndex + count);
+    
   } catch (error) {
     console.error(error);
+    state.reader.isGenerating = false;
+    updateReaderPlayButton();
     setStatus("Playback failed", "error");
     pauseReaderPlayback();
   }
@@ -850,6 +1247,8 @@ async function playNextChunk() {
 function pauseReaderPlayback() {
   state.reader.isPlaying = false;
   state.reader.isAdvancing = false;
+  state.reader.highlightRange = null;
+  state.reader.isGenerating = false;
   resetPlayback();
   setStatus("Paused", "idle");
   renderReader();
@@ -857,6 +1256,7 @@ function pauseReaderPlayback() {
 
 function toggleReaderPlayback() {
   if (!state.book || !state.activeVoice) return;
+  if (state.reader.isGenerating && !state.reader.isPlaying) return;
   if (state.reader.isPlaying) {
     pauseReaderPlayback();
   } else {
@@ -864,6 +1264,21 @@ function toggleReaderPlayback() {
   renderReader();
   playNextChunk();
   }
+}
+
+function changeReaderPage(delta) {
+  if (!state.book || !state.reader.pages.length) return;
+  const nextIndex = Math.min(
+    Math.max(state.reader.pageIndex + delta, 0),
+    state.reader.pages.length - 1
+  );
+  if (nextIndex === state.reader.pageIndex) return;
+  state.reader.pageIndex = nextIndex;
+  const sIdx = state.reader.sentencePageMap.findIndex(v => v === state.reader.pageIndex);
+  if (sIdx >= 0) state.reader.sentenceIndex = sIdx;
+  state.reader.highlightRange = null;
+  renderReader();
+  persistReadingPosition();
 }
 
 async function handleVoiceClone() {
@@ -964,7 +1379,9 @@ loadSettings();
 loadLibrary().then(() => {
   backfillVoices();
   applySettingsToUI();
-  setActiveBook(state.activeBookId);
+  if (state.activeBookId) {
+    setActiveBook(state.activeBookId);
+  }
 });
 
 // Event Listeners
@@ -1035,21 +1452,101 @@ voicePlaybackBtn.addEventListener("click", togglePlayback);
 voiceCloneButton.addEventListener("click", handleVoiceClone);
 
 readerPrev.addEventListener("click", () => {
-  if (state.reader.pageIndex > 0) {
-    state.reader.pageIndex--;
-    const sIdx = state.reader.sentencePageMap.findIndex(v => v === state.reader.pageIndex);
-    if (sIdx >= 0) state.reader.sentenceIndex = sIdx;
-    renderReader();
-  }
+  changeReaderPage(-1);
 });
 
 readerNext.addEventListener("click", () => {
-  if (state.reader.pageIndex < state.reader.pages.length - 1) {
-    state.reader.pageIndex++;
-    const sIdx = state.reader.sentencePageMap.findIndex(v => v === state.reader.pageIndex);
-    if (sIdx >= 0) state.reader.sentenceIndex = sIdx;
+  changeReaderPage(1);
+});
+
+readerPlay.addEventListener("click", toggleReaderPlayback);
+
+readSelectionBtn.addEventListener("click", () => {
+  const index = Number(readSelectionBtn.dataset.sentenceIndex);
+  if (!Number.isInteger(index) || index < 0) return;
+  const selectionText = (window.getSelection && window.getSelection())
+    ? window.getSelection().toString().trim()
+    : "";
+  console.log("Read from here selection:", { index, selectionText });
+  const sentenceAtIndex = state.reader.sentences[index] || "";
+  console.log("Read from here mapped sentence:", { index, sentenceAtIndex });
+  hideReadSelectionButton();
+  const selection = window.getSelection();
+  if (selection) selection.removeAllRanges();
+  pauseReaderPlayback();
+  state.reader.sentenceIndex = index;
+  const targetPageIndex = state.reader.sentencePageMap[index];
+  if (Number.isInteger(targetPageIndex)) {
+    state.reader.pageIndex = targetPageIndex;
+  }
+  state.reader.highlightRange = null;
+  persistReadingPosition();
+  if (state.activeVoice) {
+    state.reader.isPlaying = true;
+    renderReader();
+    playNextChunk();
+  } else {
     renderReader();
   }
 });
 
-readerPlay.addEventListener("click", toggleReaderPlayback);
+document.addEventListener("selectionchange", scheduleUpdateReadSelectionButton);
+readerText.addEventListener("scroll", hideReadSelectionButton);
+
+document.addEventListener("keydown", (e) => {
+  const isEditable = e.target && (e.target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName));
+  if (isEditable) return;
+  if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    changeReaderPage(-1);
+  } else if (e.key === "ArrowRight") {
+    e.preventDefault();
+    changeReaderPage(1);
+  }
+});
+
+readerText.addEventListener("click", (e) => {
+  const link = e.target.closest("a");
+  if (link && link.getAttribute("href")) {
+    e.preventDefault();
+    const href = link.getAttribute("href").split('#');
+    const targetFile = href[0]; // e.g. "chapter1.xhtml"
+    const targetId = href[1];   // e.g. "section1"
+    
+    let targetPageIndex = -1;
+    
+    // Search for the target page
+    for (let i = 0; i < state.reader.pages.length; i++) {
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = state.reader.pages[i];
+      
+      // If we have an ID, search for it
+      if (targetId) {
+        if (tempDiv.querySelector(`[id="${targetId}"]`)) {
+          targetPageIndex = i;
+          break;
+        }
+      } 
+      
+      // If no ID match yet, but we have a target file, match by data-source
+      if (targetPageIndex === -1 && targetFile) {
+        // Match if the page contains a block from the target file
+        if (tempDiv.querySelector(`[data-source*="${targetFile}"]`)) {
+          targetPageIndex = i;
+          break;
+        }
+      }
+    }
+    
+    if (targetPageIndex !== -1) {
+      state.reader.pageIndex = targetPageIndex;
+      const sIdx = state.reader.sentencePageMap.findIndex(v => v === state.reader.pageIndex);
+      if (sIdx >= 0) state.reader.sentenceIndex = sIdx;
+      renderReader();
+      persistReadingPosition();
+      readerText.scrollTop = 0;
+    } else {
+      console.log("Navigation target not found:", href.join('#'));
+    }
+  }
+});
