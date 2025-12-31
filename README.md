@@ -1,7 +1,14 @@
-# Tauri + Vanilla
+# Rebook
 
-This template should help get you started developing with Tauri in vanilla HTML, CSS and Javascript.
+## Demo
 
-## Recommended IDE Setup
+[Watch the demo video](assets/tolkien_rings.mp4)
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+
+## Setup
+Copy .env.example to .env. Then add your Eleven Labs or Minimax keys. Unfortunately Eleven Labs requires a paid plan to use voice cloning. Local model running is on my roadmap!
+
+Run:
+```
+cargo tauri dev
+```
