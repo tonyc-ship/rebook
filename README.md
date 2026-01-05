@@ -1,10 +1,9 @@
 # ReBook
 
 ## Demos
+https://github.com/user-attachments/assets/701227ed-024c-4c3e-87ab-a232767810a3
 
-| JRR Tolkien reading The Lord of the Rings | Harry reading Harry Potter |
-|---|---|
-| https://github.com/user-attachments/assets/701227ed-024c-4c3e-87ab-a232767810a3 | https://github.com/user-attachments/assets/43883c3d-5615-4cd4-91c7-aa5b9910cab1 |
+https://github.com/user-attachments/assets/43883c3d-5615-4cd4-91c7-aa5b9910cab1
 
 
 
